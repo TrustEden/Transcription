@@ -1,0 +1,32 @@
+Transcription Processing Tool
+Build a Python desktop app for processing audio files into formatted transcripts.
+Tech Stack:
+
+Python 3.10+
+faster-whisper for transcription
+Groq Python SDK (llama-3.3-70b model)
+Tkinter for GUI
+JSON for intermediate storage
+python-docx for Word output
+
+Workflow:
+Section 1: Transcription
+
+Input field for project/client name
+File upload button (accepts MP3, WAV, M4A, MP4)
+"Transcribe" button
+Progress indicator while processing
+Saves output as JSON with: project name, timestamp, full transcript text, speaker labels, and timestamps per segment
+
+Section 2: Formatting & Review
+
+Dropdown to select saved JSON files by project name
+"Format" button that sends transcript to Groq with this prompt: "Format this podcast transcript for YouTube subtitles. Clean up verbal tics (um, uh, like), add proper punctuation, break into subtitle-sized segments with timestamps. Keep all spoken content accurate."
+Text editor window showing the formatted result
+"Save to Completed" button that exports as .docx to a "completed" folder with project name and date
+
+Settings:
+
+Single text field for Groq API key
+
+That's it. Make it functional, not pretty.
