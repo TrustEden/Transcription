@@ -32,7 +32,18 @@ def format_transcript(json_filepath, api_key, progress_callback=None):
     client = Groq(api_key=api_key)
 
     # Format using Groq
-    prompt = """Format this podcast transcript for YouTube subtitles. Clean up verbal tics (um, uh, like), add proper punctuation, break into subtitle-sized segments with timestamps. Keep all spoken content accurate.
+    prompt = """Format this transcript exactly as provided.
+
+IMPORTANT RULES:
+- Do NOT change, remove, or modify any words
+- Do NOT edit out or censor swear words or profanity
+- Do NOT clean up verbal tics (um, uh, like, etc.)
+- Do NOT paraphrase or reword anything
+- ONLY add proper punctuation and formatting
+- Break into readable paragraphs or segments as appropriate
+- Preserve the EXACT words spoken, including all language choices
+
+Your ONLY job is to format the text for readability while keeping every single word exactly as it appears.
 
 Transcript:
 """ + transcript_text
