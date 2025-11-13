@@ -8,7 +8,7 @@ def load_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
-    return {"groq_api_key": ""}
+    return {"groq_api_key": "", "huggingface_token": ""}
 
 def save_config(config):
     """Save configuration to JSON file."""
@@ -24,4 +24,15 @@ def set_groq_api_key(api_key):
     """Save the Groq API key to config."""
     config = load_config()
     config["groq_api_key"] = api_key
+    save_config(config)
+
+def get_huggingface_token():
+    """Get the HuggingFace token from config."""
+    config = load_config()
+    return config.get("huggingface_token", "")
+
+def set_huggingface_token(token):
+    """Save the HuggingFace token to config."""
+    config = load_config()
+    config["huggingface_token"] = token
     save_config(config)

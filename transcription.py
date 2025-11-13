@@ -1,14 +1,14 @@
-from faster_whisper import WhisperModel
+import whisperx
 import json
 import os
+import gc
+import torch
 from datetime import datetime
-
-# Initialize model (base model for speed/accuracy balance)
-model = WhisperModel("base", device="cpu", compute_type="int8")
+from config_manager import get_huggingface_token
 
 def transcribe_audio(audio_file_path, project_name, progress_callback=None):
     """
-    Transcribe audio file and save as JSON.
+    Transcribe audio file with speaker diarization using WhisperX.
 
     Args:
         audio_file_path: Path to audio file (MP3, WAV, M4A, MP4)
@@ -19,10 +19,62 @@ def transcribe_audio(audio_file_path, project_name, progress_callback=None):
         Path to saved JSON file
     """
     if progress_callback:
-        progress_callback("Starting transcription...")
+        progress_callback("Loading WhisperX model...")
 
-    # Transcribe
-    segments, info = model.transcribe(audio_file_path, beam_size=5)
+    # Detect if CUDA is available, otherwise use CPU
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    compute_type = "float16" if device == "cuda" else "int8"
+    batch_size = 16  # reduce if running out of memory
+
+    # 1. Transcribe with WhisperX
+    model = whisperx.load_model("base", device, compute_type=compute_type)
+
+    if progress_callback:
+        progress_callback("Transcribing audio...")
+
+    audio = whisperx.load_audio(audio_file_path)
+    result = model.transcribe(audio, batch_size=batch_size)
+
+    # 2. Align whisper output
+    if progress_callback:
+        progress_callback("Aligning transcription...")
+
+    model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
+    result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
+
+    # Clear GPU memory
+    gc.collect()
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    del model_a
+
+    # 3. Assign speaker labels
+    if progress_callback:
+        progress_callback("Running speaker diarization...")
+
+    hf_token = get_huggingface_token()
+    if hf_token and hf_token.strip():
+        try:
+            diarize_model = whisperx.DiarizationPipeline(use_auth_token=hf_token, device=device)
+            diarize_segments = diarize_model(audio)
+            result = whisperx.assign_word_speakers(diarize_segments, result)
+        except Exception as e:
+            # If diarization fails, continue without speaker labels
+            if progress_callback:
+                progress_callback(f"Diarization failed: {str(e)}. Continuing without speaker labels...")
+            for segment in result["segments"]:
+                segment["speaker"] = "Speaker"
+    else:
+        # No HuggingFace token configured
+        if progress_callback:
+            progress_callback("No HuggingFace token configured. Skipping diarization...")
+        for segment in result["segments"]:
+            segment["speaker"] = "Speaker"
+
+    # Clear GPU memory
+    gc.collect()
+    if device == "cuda":
+        torch.cuda.empty_cache()
 
     if progress_callback:
         progress_callback("Processing segments...")
@@ -36,15 +88,15 @@ def transcribe_audio(audio_file_path, project_name, progress_callback=None):
     }
 
     full_text = []
-    for segment in segments:
+    for segment in result["segments"]:
         segment_data = {
-            "start": segment.start,
-            "end": segment.end,
-            "text": segment.text.strip(),
-            "speaker": "Speaker"  # faster-whisper doesn't do speaker diarization by default
+            "start": segment["start"],
+            "end": segment["end"],
+            "text": segment["text"].strip(),
+            "speaker": segment.get("speaker", "Speaker")
         }
         transcript_data["segments"].append(segment_data)
-        full_text.append(segment.text.strip())
+        full_text.append(segment["text"].strip())
 
     transcript_data["full_transcript"] = " ".join(full_text)
 
