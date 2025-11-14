@@ -36,3 +36,14 @@ def set_huggingface_token(token):
     config = load_config()
     config["huggingface_token"] = token
     save_config(config)
+
+def get_confidence_threshold():
+    """Get the confidence threshold from config."""
+    config = load_config()
+    return config.get("confidence_threshold", 70)  # Default 70%
+
+def set_confidence_threshold(threshold):
+    """Save the confidence threshold to config."""
+    config = load_config()
+    config["confidence_threshold"] = int(threshold)
+    save_config(config)

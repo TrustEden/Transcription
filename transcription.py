@@ -89,11 +89,17 @@ def transcribe_audio(audio_file_path, project_name, progress_callback=None):
 
     full_text = []
     for segment in result["segments"]:
+        # Convert avg_logprob to percentage (approximate confidence)
+        # avg_logprob typically ranges from -2 to 0, where 0 is perfect
+        avg_logprob = segment.get("avg_logprob", -1.0)
+        confidence = min(100, max(0, int((1 + avg_logprob) * 100)))
+
         segment_data = {
             "start": segment["start"],
             "end": segment["end"],
             "text": segment["text"].strip(),
-            "speaker": segment.get("speaker", "Speaker")
+            "speaker": segment.get("speaker", "Speaker"),
+            "confidence": confidence
         }
         transcript_data["segments"].append(segment_data)
         full_text.append(segment["text"].strip())

@@ -1,9 +1,11 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import threading
+import subprocess
+import sys
 from transcription import transcribe_audio, get_saved_transcripts
 from formatter import format_transcript, save_to_docx
-from config_manager import get_groq_api_key, set_groq_api_key, get_huggingface_token, set_huggingface_token
+from config_manager import get_groq_api_key, set_groq_api_key, get_huggingface_token, set_huggingface_token, get_confidence_threshold, set_confidence_threshold
 
 class TranscriptionApp:
     def __init__(self, root):
@@ -15,7 +17,27 @@ class TranscriptionApp:
         self.selected_json_file = None
         self.formatted_text = ""
 
+        # Check ffmpeg availability
+        if not self.check_ffmpeg():
+            messagebox.showwarning(
+                "ffmpeg Not Found",
+                "ffmpeg is required for video file processing.\n"
+                "Please install ffmpeg and add it to your system PATH.\n"
+                "Download from: https://ffmpeg.org/download.html"
+            )
+
         self.create_widgets()
+
+    def check_ffmpeg(self):
+        """Check if ffmpeg is available."""
+        try:
+            subprocess.run(['ffmpeg', '-version'],
+                          capture_output=True,
+                          check=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
 
     def create_widgets(self):
         # Create notebook (tabbed interface)
@@ -88,6 +110,11 @@ class TranscriptionApp:
         self.review_text = tk.Text(text_frame, wrap="word", height=20)
         self.review_text.pack(side="left", fill="both", expand=True)
 
+        # Configure tag for low confidence highlighting
+        self.review_text.tag_configure("low_confidence",
+                                       foreground="red",
+                                       underline=True)
+
         scrollbar = ttk.Scrollbar(text_frame, command=self.review_text.yview)
         scrollbar.pack(side="right", fill="y")
         self.review_text.config(yscrollcommand=scrollbar.set)
@@ -107,8 +134,71 @@ class TranscriptionApp:
 
         self.transcript_dropdown = ttk.Combobox(select_frame, width=40, state="readonly")
         self.transcript_dropdown.pack(side="left", padx=5)
+        self.transcript_dropdown.bind("<<ComboboxSelected>>", self.on_transcript_selected_for_format)
 
         ttk.Button(select_frame, text="Refresh", command=self.refresh_transcripts).pack(side="left")
+
+        # Speaker name replacement section
+        self.speaker_frame = ttk.LabelFrame(parent, text="Speaker Names (Optional)", padding=10)
+        self.speaker_frame.pack(fill="x", padx=10, pady=10)
+
+        self.speaker_entries = {}  # Dictionary to hold speaker name entries
+
+        # Formatting Options Section
+        options_frame = ttk.LabelFrame(parent, text="Formatting Options", padding=10)
+        options_frame.pack(fill="x", padx=10, pady=10)
+
+        # Create checkbox variables
+        self.filter_swears_var = tk.BooleanVar(value=False)
+        self.remove_fillers_var = tk.BooleanVar(value=False)
+        self.improve_punctuation_var = tk.BooleanVar(value=True)  # Default ON
+        self.clean_grammar_var = tk.BooleanVar(value=False)
+        self.add_timestamps_var = tk.BooleanVar(value=False)
+        self.formal_tone_var = tk.BooleanVar(value=False)
+
+        # Create checkboxes (2 columns)
+        left_col = ttk.Frame(options_frame)
+        left_col.pack(side="left", fill="both", expand=True)
+
+        right_col = ttk.Frame(options_frame)
+        right_col.pack(side="left", fill="both", expand=True)
+
+        ttk.Checkbutton(left_col, text="Filter swear words",
+                       variable=self.filter_swears_var).pack(anchor="w", pady=2)
+        ttk.Checkbutton(left_col, text="Remove filler words (um, uh, like)",
+                       variable=self.remove_fillers_var).pack(anchor="w", pady=2)
+        ttk.Checkbutton(left_col, text="Improve punctuation",
+                       variable=self.improve_punctuation_var).pack(anchor="w", pady=2)
+
+        ttk.Checkbutton(right_col, text="Clean up grammar",
+                       variable=self.clean_grammar_var).pack(anchor="w", pady=2)
+        ttk.Checkbutton(right_col, text="Add timestamps",
+                       variable=self.add_timestamps_var).pack(anchor="w", pady=2)
+        ttk.Checkbutton(right_col, text="Use formal/technical tone",
+                       variable=self.formal_tone_var).pack(anchor="w", pady=2)
+
+        # Template Selection Section
+        template_frame = ttk.LabelFrame(parent, text="Output Template", padding=10)
+        template_frame.pack(fill="x", padx=10, pady=10)
+
+        ttk.Label(template_frame, text="Select format template:").pack(anchor="w", pady=(0, 5))
+
+        self.template_var = tk.StringVar(value="standard")
+
+        templates = [
+            ("standard", "Standard Transcript - Speaker labels, timestamps, paragraphs"),
+            ("qa", "Q&A Format - Question/Answer structure"),
+            ("clean", "Clean Text - No labels/timestamps, flowing text"),
+            ("captions", "Timestamped Captions - SRT/VTT style")
+        ]
+
+        for template_id, description in templates:
+            ttk.Radiobutton(
+                template_frame,
+                text=description,
+                variable=self.template_var,
+                value=template_id
+            ).pack(anchor="w", pady=2)
 
         # Format button
         ttk.Button(parent, text="Format", command=self.start_formatting).pack(pady=20)
@@ -162,6 +252,26 @@ class TranscriptionApp:
 
         ttk.Button(parent, text="Save HuggingFace Token", command=self.save_hf_token).pack(pady=10)
 
+        # Confidence Threshold Setting
+        ttk.Label(parent, text="Confidence Threshold (%):").pack(pady=(20, 0))
+
+        threshold_frame = ttk.Frame(parent)
+        threshold_frame.pack(pady=5)
+
+        self.confidence_threshold_var = tk.StringVar(value=str(get_confidence_threshold()))
+        confidence_spinbox = ttk.Spinbox(
+            threshold_frame,
+            from_=0,
+            to=100,
+            textvariable=self.confidence_threshold_var,
+            width=10
+        )
+        confidence_spinbox.pack(side="left", padx=5)
+
+        ttk.Label(threshold_frame, text="(Segments below this will be highlighted in Review)").pack(side="left")
+
+        ttk.Button(parent, text="Save Threshold", command=self.save_confidence_threshold).pack(pady=10)
+
         # Instructions
         instructions = """
 Instructions:
@@ -173,7 +283,7 @@ Instructions:
 
     def browse_audio_file(self):
         filetypes = [
-            ("Audio Files", "*.mp3 *.wav *.m4a *.mp4"),
+            ("Audio/Video Files", "*.mp3 *.wav *.m4a *.mp4 *.mov *.avi *.mkv *.webm"),
             ("All Files", "*.*")
         ]
         filename = filedialog.askopenfilename(filetypes=filetypes)
@@ -216,6 +326,52 @@ Instructions:
         # Store the mapping
         self.transcript_files = transcripts
 
+    def get_unique_speakers(self, json_filepath):
+        """Get list of unique speakers from transcript."""
+        import json
+        with open(json_filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        speakers = set()
+        for segment in data.get("segments", []):
+            speaker = segment.get("speaker", "Speaker")
+            speakers.add(speaker)
+
+        return sorted(list(speakers))
+
+    def on_transcript_selected_for_format(self, event=None):
+        """When transcript is selected, populate speaker name fields."""
+        selected_index = self.transcript_dropdown.current()
+        if selected_index < 0:
+            return
+
+        filepath = self.transcript_files[selected_index]['filepath']
+        speakers = self.get_unique_speakers(filepath)
+
+        # Clear existing speaker entries
+        for widget in self.speaker_frame.winfo_children():
+            widget.destroy()
+        self.speaker_entries.clear()
+
+        # Create entry fields for each speaker
+        if speakers:
+            ttk.Label(self.speaker_frame,
+                     text=f"{len(speakers)} speaker(s) detected",
+                     font=("", 9, "bold")).pack(anchor="w", pady=(0, 10))
+
+            for speaker in speakers:
+                row = ttk.Frame(self.speaker_frame)
+                row.pack(fill="x", pady=2)
+
+                ttk.Label(row, text=f"{speaker}:", width=15).pack(side="left")
+                entry = ttk.Entry(row, width=30)
+                entry.pack(side="left", padx=5)
+                entry.insert(0, "")  # Empty by default
+
+                self.speaker_entries[speaker] = entry
+        else:
+            ttk.Label(self.speaker_frame, text="No speakers detected").pack()
+
     def start_formatting(self):
         if not self.transcript_dropdown.get():
             messagebox.showerror("Error", "Please select a transcript")
@@ -233,13 +389,40 @@ Instructions:
 
         self.selected_json_file = self.transcript_files[selected_index]['filepath']
 
+        # Build speaker mapping from entries
+        speaker_mapping = {}
+        for speaker_label, entry in self.speaker_entries.items():
+            custom_name = entry.get().strip()
+            if custom_name:
+                speaker_mapping[speaker_label] = custom_name
+
+        # Build formatting options
+        formatting_options = {
+            "filter_swears": self.filter_swears_var.get(),
+            "remove_fillers": self.remove_fillers_var.get(),
+            "improve_punctuation": self.improve_punctuation_var.get(),
+            "clean_grammar": self.clean_grammar_var.get(),
+            "add_timestamps": self.add_timestamps_var.get(),
+            "formal_tone": self.formal_tone_var.get()
+        }
+
+        # Get selected template
+        template = self.template_var.get()
+
         # Run formatting in background thread
         def format_text():
             try:
                 def update_progress(msg):
                     self.format_progress_label.config(text=msg)
 
-                self.formatted_text = format_transcript(self.selected_json_file, api_key, update_progress)
+                self.formatted_text = format_transcript(
+                    self.selected_json_file,
+                    api_key,
+                    speaker_mapping=speaker_mapping,
+                    formatting_options=formatting_options,
+                    template=template,
+                    progress_callback=update_progress
+                )
 
                 # Update text editor
                 self.result_text.delete(1.0, tk.END)
@@ -304,15 +487,40 @@ Instructions:
         # Display the full transcript in the text editor
         self.review_text.delete(1.0, tk.END)
 
-        # Format with speaker labels for easier review
-        formatted_review = []
+        # Configure additional tags for better display
+        self.review_text.tag_configure("speaker", foreground="blue", font=("", 10, "bold"))
+        self.review_text.tag_configure("timestamp", foreground="gray")
+
+        # Get confidence threshold
+        threshold = get_confidence_threshold()
+
+        # Display segments with enhanced formatting
         for segment in data.get("segments", []):
             speaker = segment.get("speaker", "Speaker")
             text = segment.get("text", "")
-            formatted_review.append(f"[{speaker}] {text}")
+            confidence = segment.get("confidence", 100)
+            start = segment.get("start", 0)
 
-        review_content = "\n\n".join(formatted_review)
-        self.review_text.insert(1.0, review_content)
+            # Format timestamp
+            minutes = int(start // 60)
+            seconds = int(start % 60)
+            timestamp = f"[{minutes:02d}:{seconds:02d}]"
+
+            # Insert timestamp
+            self.review_text.insert(tk.END, f"{timestamp} ", "timestamp")
+
+            # Insert speaker label
+            self.review_text.insert(tk.END, f"[{speaker}] ", "speaker")
+
+            # Insert text with confidence highlighting
+            start_pos = self.review_text.index(tk.END + "-1c")
+            self.review_text.insert(tk.END, text, "")
+            end_pos = self.review_text.index(tk.END + "-1c")
+
+            if confidence < threshold:
+                self.review_text.tag_add("low_confidence", start_pos, end_pos)
+
+            self.review_text.insert(tk.END, "\n\n", "")
 
     def save_reviewed_transcript(self):
         """Save edited transcript back to JSON file."""
@@ -385,6 +593,18 @@ Instructions:
             messagebox.showinfo("Success", "HuggingFace token saved!")
         else:
             messagebox.showerror("Error", "Please enter a HuggingFace token")
+
+    def save_confidence_threshold(self):
+        """Save confidence threshold to config."""
+        try:
+            threshold = int(self.confidence_threshold_var.get())
+            if 0 <= threshold <= 100:
+                set_confidence_threshold(threshold)
+                messagebox.showinfo("Success", "Confidence threshold saved!")
+            else:
+                messagebox.showerror("Error", "Threshold must be between 0 and 100")
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number")
 
 if __name__ == "__main__":
     root = tk.Tk()
