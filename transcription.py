@@ -21,6 +21,13 @@ def transcribe_audio(audio_file_path, project_name, progress_callback=None):
     if progress_callback:
         progress_callback("Loading WhisperX model...")
 
+    # Normalize path for Windows - use absolute path with forward slashes
+    audio_file_path = os.path.abspath(audio_file_path).replace('\\', '/')
+
+    # Validate file exists
+    if not os.path.exists(audio_file_path.replace('/', '\\')):
+        raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
+
     # Detect if CUDA is available, otherwise use CPU
     device = "cuda" if torch.cuda.is_available() else "cpu"
     compute_type = "float16" if device == "cuda" else "int8"
